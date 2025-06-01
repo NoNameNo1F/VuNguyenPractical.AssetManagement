@@ -1,0 +1,6 @@
+@AssetManagement.WebAPI_HostAddress = http://localhost:7670
+
+GET {{AssetManagement.WebAPI_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

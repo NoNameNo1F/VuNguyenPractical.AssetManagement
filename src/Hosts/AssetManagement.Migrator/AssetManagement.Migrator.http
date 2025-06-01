@@ -1,0 +1,6 @@
+@AssetManagement.Migrator_HostAddress = http://localhost:5062
+
+GET {{AssetManagement.Migrator_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
