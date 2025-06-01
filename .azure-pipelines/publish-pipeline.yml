@@ -1,0 +1,107 @@
+name: $(Build.SourceBranchName)-CD-$(Date:yyyyMMdd)$(Rev:.r)
+
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - 'src/BuildingBlocks/*'
+      - 'src/Hosts/AssetManagement.Migrator/*'
+      - 'src/Hosts/AssetManagement.WebAPI/*'
+      - 'src/Modules/Assets/*'
+      - 'src/Modules/Assignments/*'
+      - 'src/Modules/Returnings/*'
+      - 'src/Modules/Identity/*'
+      - 'src/Modules/Report/*'
+      - 'src/Tests/*'
+      - './azure-pipelines/publish-pipeline.yml'
+
+pool:
+  name: Default
+  demands:
+    - Agent.Name -equals $(AGENT_NAME)
+
+variables:
+  - group: BackendSecrets
+  - name: solution
+    value: '**/*.sln'
+  - name: tag
+    value: '$(Build.BuildId)'
+  - name: buildConfiguration
+    value: 'Release'
+  - name: dotnetSdkVersion
+    value: '9.x'
+  - name: webApiProjectName
+    value: 'src/Hosts/AssetManagement.WebAPI/AssetManagement.WebAPI.csproj'
+
+stages:
+  - stage: Build_And_Package
+    displayName: 'Build, Package & Migrate DB'
+    condition: and(succeeded(), ne(variables['Build.Reason'], 'PullRequest'))
+    jobs:
+      - job: BuildPackageAndMigrate
+        displayName: 'Build .NET App, Package'
+        steps:
+          - task: UseDotNet@2
+            displayName: 'Use .NET SDK $(dotnetSdkVersion)'
+            inputs:
+              packageType: 'sdk'
+              version: '$(dotnetSdkVersion)'
+
+          - task: DotNetCoreCLI@2
+            displayName: 'Restore NuGet Packages'
+            inputs:
+              command: 'restore'
+              projects: '$(solution)'
+              feedsToUse: 'select'
+
+          - task: DotNetCoreCLI@2
+            displayName: 'Build Solution'
+            inputs:
+              command: 'build'
+              projects: '$(solution)'
+              arguments: '--configuration $(buildConfiguration) --no-restore'
+
+          - task: DotNetCoreCLI@2
+            displayName: 'Publish WebAPI for Deployment'
+            inputs:
+              command: 'publish'
+              publishWebProjects: false
+              projects: '$(webApiProjectName)'
+              arguments: '--configuration $(buildConfiguration) --output $(Build.ArtifactStagingDirectory) --no-build /p:EnvironmentName=Development'
+              zipAfterPublish: true
+
+          - task: PublishPipelineArtifact@1
+            displayName: 'Publish WebApp Artifact (AppPackage.zip)'
+            inputs:
+              targetPath: '$(Build.ArtifactStagingDirectory)'
+              artifactName: 'WebAppPackage'
+
+  - stage: Deploy_To_AppService
+    displayName: 'Deploy to App Service'
+    dependsOn: Build_And_Package
+    condition: succeeded()
+    jobs:
+      - deployment: DeployWebAppToAAS
+        displayName: 'Deploy Web App to Azure App Service'
+        environment: Development
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - task: DownloadPipelineArtifact@2
+                  displayName: 'Download WebAppPackage Artifact'
+                  inputs:
+                    buildType: 'current'
+                    artifactName: 'WebAppPackage'
+                    targetPath: '$(Pipeline.Workspace)/WebAppPackage'
+                
+                # Step 2: Deploy to Azure App Service
+                - task: AzureWebApp@1
+                  displayName: 'Deploy to Azure App Service'
+                  inputs:
+                    azureSubscription: $(APP_SERVICE_CONNECTION)
+                    appType: 'webApp'
+                    appName: $(APP_SERVICE_NAME)
+                    package: '$(Pipeline.Workspace)/WebAppPackage/**/*.zip'

@@ -1,0 +1,66 @@
+name: $(Build.SourceBranchName)-$(Date:yyyyMMdd)$(Rev:.r)
+
+trigger: none
+
+pr:
+  branches:
+    include:
+      - main
+
+  paths:
+    include:
+      - 'src/BuildingBlocks/*'
+      - 'src/Hosts/AssetManagement.Migrator/*'
+      - 'src/Hosts/AssetManagement.WebAPI/*'
+      - 'src/Modules/Assets/*'
+      - 'src/Modules/Assignments/*'
+      - 'src/Modules/Returnings/*'
+      - 'src/Modules/Identity/*'
+      - 'src/Modules/Report/*'
+      - 'src/Tests/*'
+      - './azure-pipelines/pr-pipeline.yml'
+
+variables:
+  - group: be-asset-management
+  - name: tag
+    value: '$(Build.BuildId)'
+  - name: solution
+    value: 'src/VuNguyenPractical.AssetManagement.sln'
+  - name: buildPlatform
+    value: 'Any CPU'
+  - name: buildConfiguration
+    value: 'Release'
+
+pool:
+  name: Default
+  demands:
+    - Agent.Name -equals $(AGENT_NAME)
+
+stages:
+  - stage: Build
+    displayName: 'CI: Build'
+    condition: and(succeeded(), eq(variables['Build.Reason'], 'PullRequest'))
+    
+    jobs:
+      - job: Build
+        displayName: Build
+        steps:
+          - task: UseDotNet@2
+            displayName: 'USe .NET SDK'
+            inputs:
+              packageType: 'sdk'
+              version: '9.x'
+
+          - task: DotNetCoreCLI@2
+            displayName: 'Restore NuGet Packages'
+            inputs:
+              command: 'restore'
+              projects: '$(solution)'
+              feedsToUse: 'select'
+
+          - task: DotNetCoreCLI@2
+            displayName: 'Build Solution'
+            inputs:
+              command: 'build'
+              projects: '$(solution)'
+              arguments: '--configuration $(buildConfiguration) --no-restore'
